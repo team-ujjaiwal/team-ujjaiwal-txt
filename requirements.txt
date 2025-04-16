@@ -1,7 +1,7 @@
-Flask[async]
-requests
-aiohttp
-googleapis-common-protos
-pycryptodome
-protobuf
-Werkzeug
+Flask>=2.2
+requests>=2.28
+aiohttp>=3.8
+googleapis-common-protos>=1.56
+pycryptodome>=3.15
+protobuf>=4.21
+Werkzeug>=2.2
