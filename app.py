@@ -126,7 +126,9 @@ def make_request(encrypt, server_name, token):
             url = "https://client.us.freefiremobile.com/GetPlayerPersonalShow"
         else:
             url = "https://clientbp.ggblueshark.com/GetPlayerPersonalShow"
+
         edata = bytes.fromhex(encrypt)
+
         headers = {
             'User-Agent': "Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)",
             'Connection': "Keep-Alive",
@@ -138,12 +140,27 @@ def make_request(encrypt, server_name, token):
             'X-GA': "v1 1",
             'ReleaseVersion': "OB48"
         }
+
+        # Debug print
+        print("=== [DEBUG: make_request] ===")
+        print(">> Encrypted UID:", encrypt)
+        print(">> Token (partial):", token[:15], "...")
+        print(">> URL:", url)
+
         response = requests.post(url, data=edata, headers=headers, verify=False)
+
+        print(">> Response Status:", response.status_code)
+        print(">> Raw Response Content (first 200 bytes):", response.content[:200])
+
+        if response.status_code != 200:
+            print(">> Error: Bad response from server.")
+            return None
+
         hex_data = response.content.hex()
         binary = bytes.fromhex(hex_data)
         decode = decode_protobuf(binary)
         if decode is None:
-            app.logger.error("Protobuf decoding returned None.")
+            print(">> Error: Could not decode protobuf data.")
         return decode
     except Exception as e:
         app.logger.error(f"Error in make_request: {e}")
@@ -178,7 +195,6 @@ def handle_requests():
             if encrypted_uid is None:
                 raise Exception("Encryption of UID failed.")
 
-            # الحصول على بيانات اللاعب قبل تنفيذ عملية الإعجاب
             before = make_request(encrypted_uid, server_name, token)
             if before is None:
                 raise Exception("Failed to retrieve initial player info.")
@@ -187,14 +203,8 @@ def handle_requests():
             except Exception as e:
                 raise Exception(f"Error converting 'before' protobuf to JSON: {e}")
             data_before = json.loads(jsone)
-            before_like = data_before.get('AccountInfo', {}).get('Likes', 0)
-            try:
-                before_like = int(before_like)
-            except Exception:
-                before_like = 0
-            app.logger.info(f"Likes before command: {before_like}")
+            before_like = int(data_before.get('AccountInfo', {}).get('Likes', 0))
 
-            # تحديد رابط الإعجاب حسب اسم السيرفر
             if server_name == "IND":
                 url = "https://client.ind.freefiremobile.com/LikeProfile"
             elif server_name in {"BR", "US", "SAC", "NA"}:
@@ -202,10 +212,8 @@ def handle_requests():
             else:
                 url = "https://clientbp.ggblueshark.com/LikeProfile"
 
-            # إرسال الطلبات بشكل غير متزامن
             asyncio.run(send_multiple_requests(uid, server_name, url))
 
-            # الحصول على بيانات اللاعب بعد تنفيذ عملية الإعجاب
             after = make_request(encrypted_uid, server_name, token)
             if after is None:
                 raise Exception("Failed to retrieve player info after like requests.")
