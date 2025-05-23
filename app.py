@@ -64,7 +64,7 @@ async def send_request(encrypted_uid, token, url):
             'Expect': "100-continue",
             'X-Unity-Version': "2018.4.11f1",
             'X-GA': "v1 1",
-            'ReleaseVersion': "OB48"
+            'ReleaseVersion': "OB49"
         }
         async with aiohttp.ClientSession() as session:
             async with session.post(url, data=edata, headers=headers) as response:
@@ -136,7 +136,7 @@ def make_request(encrypt, server_name, token):
             'Expect': "100-continue",
             'X-Unity-Version': "2018.4.11f1",
             'X-GA': "v1 1",
-            'ReleaseVersion': "OB48"
+            'ReleaseVersion': "OB49"
         }
         response = requests.post(url, data=edata, headers=headers, verify=False)
         hex_data = response.content.hex()
@@ -170,72 +170,60 @@ def handle_requests():
 
     try:
         def process_request():
-    tokens = load_tokens(server_name)
-    if tokens is None:
-        raise Exception("Failed to load tokens.")
-    token = tokens[0]['token']
-    encrypted_uid = enc(uid)
-    if encrypted_uid is None:
-        raise Exception("Encryption of UID failed.")
+            tokens = load_tokens(server_name)
+            if tokens is None:
+                raise Exception("Failed to load tokens.")
+            token = tokens[0]['token']
+            encrypted_uid = enc(uid)
+            if encrypted_uid is None:
+                raise Exception("Encryption of UID failed.")
 
-    # Try to get BEFORE like count
-    try:
-        before = make_request(encrypted_uid, server_name, token)
-        jsone = MessageToJson(before)
-        data_before = json.loads(jsone)
-        before_like = int(data_before.get('AccountInfo', {}).get('Likes', 0))
-    except:
-        before_like = "N/A"
+            before = make_request(encrypted_uid, server_name, token)
+            if before is None:
+                raise Exception("Failed to retrieve initial player info.")
+            try:
+                jsone = MessageToJson(before)
+            except Exception as e:
+                raise Exception(f"Error converting 'before' protobuf to JSON: {e}")
+            data_before = json.loads(jsone)
+            before_like = data_before.get('AccountInfo', {}).get('Likes', 0)
+            try:
+                before_like = int(before_like)
+            except Exception:
+                before_like = 0
+            app.logger.info(f"Likes before command: {before_like}")
 
-    # LIKE API endpoint
-    if server_name == "IND":
-        url = "https://client.ind.freefiremobile.com/LikeProfile"
-    elif server_name in {"BR", "US", "SAC", "NA"}:
-        url = "https://client.us.freefiremobile.com/LikeProfile"
-    else:
-        url = "https://clientbp.ggblueshark.com/LikeProfile"
+            if server_name == "IND":
+                url = "https://client.ind.freefiremobile.com/LikeProfile"
+            elif server_name in {"BR", "US", "SAC", "NA"}:
+                url = "https://client.us.freefiremobile.com/LikeProfile"
+            else:
+                url = "https://clientbp.ggblueshark.com/LikeProfile"
 
-    # Send Likes (always)
-    asyncio.run(send_multiple_requests(uid, server_name, url))
+            asyncio.run(send_multiple_requests(uid, server_name, url))
 
-    # Try to get AFTER like count
-    try:
-        after = make_request(encrypted_uid, server_name, token)
-        jsone_after = MessageToJson(after)
-        data_after = json.loads(jsone_after)
-        after_like = int(data_after.get('AccountInfo', {}).get('Likes', 0))
-        player_uid = int(data_after.get('AccountInfo', {}).get('UID', 0))
-        player_name = str(data_after.get('AccountInfo', {}).get('PlayerNickname', ''))
-    except:
-        # Fallback to external player-info API
-        after_like = "N/A"
-        player_uid = uid
-        try:
-            response = requests.get(
-                f"https://garenafreefireteams.onrender.com/player-info?uid={uid}&region={server_name.lower()}&key=2explainationskeysforujjaiwal"
-            )
-            data = response.json()
-            player_name = data.get("ACCOUNT BASIC INFO", {}).get("nickname", "Unknown")
-        except:
-            player_name = "Unknown"
-
-    # Calculate like_given safely
-    try:
-        like_given = after_like - before_like
-        status = 1 if like_given != 0 else 2
-    except:
-        like_given = "N/A"
-        status = 1
-
-    result = {
-        "LikesGivenByAPI": like_given,
-        "LikesafterCommand": after_like,
-        "LikesbeforeCommand": before_like,
-        "PlayerNickname": player_name,
-        "UID": player_uid,
-        "status": status
-    }
-    return result
+            after = make_request(encrypted_uid, server_name, token)
+            if after is None:
+                raise Exception("Failed to retrieve player info after like requests.")
+            try:
+                jsone_after = MessageToJson(after)
+            except Exception as e:
+                raise Exception(f"Error converting 'after' protobuf to JSON: {e}")
+            data_after = json.loads(jsone_after)
+            after_like = int(data_after.get('AccountInfo', {}).get('Likes', 0))
+            player_uid = int(data_after.get('AccountInfo', {}).get('UID', 0))
+            player_name = str(data_after.get('AccountInfo', {}).get('PlayerNickname', ''))
+            like_given = after_like - before_like
+            status = 1 if like_given != 0 else 2
+            result = {
+                "LikesGivenByAPI": like_given,
+                "LikesbeforeCommand": before_like,
+                "LikesafterCommand": after_like,
+                "PlayerNickname": player_name,
+                "UID": player_uid,
+                "status": status
+            }
+            return result
 
         result = process_request()
         return jsonify(result)
