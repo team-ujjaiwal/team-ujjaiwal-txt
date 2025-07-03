@@ -17,7 +17,7 @@ app = Flask(__name__)
 
 # ---- Configuration ----
 API_START_TIME = datetime(2025, 7, 3, 12, 0, 0)  # <-- Set when you deploy
-API_EXPIRY_TIME = API_START_TIME + timedelta(days=3) 
+API_EXPIRY_TIME = API_START_TIME + timedelta(days=3)
 SECRET_API_KEY = "3dayskeysforujjaiwal"
 MAX_REQUESTS = 30
 
@@ -33,7 +33,7 @@ def format_time_remaining():
     days = remaining.days
     hours, remainder = divmod(remaining.seconds, 3600)
     minutes, _ = divmod(remainder, 60)
-    return f"{days} day(s), {hours} hour(s), {minutes} minute(s)"
+    return f"{days} day(s), {hours} hour(s), {minutes} minute(s)"}
 
 
 def load_tokens(server_name):
@@ -107,16 +107,13 @@ async def send_multiple_requests(uid, server_name, url):
         region = server_name
         protobuf_message = create_protobuf_message(uid, region)
         if protobuf_message is None:
-            app.logger.error("Failed to create protobuf message.")
             return None
         encrypted_uid = encrypt_message(protobuf_message)
         if encrypted_uid is None:
-            app.logger.error("Encryption failed.")
             return None
         tasks = []
         tokens = load_tokens(server_name)
         if tokens is None:
-            app.logger.error("Failed to load tokens.")
             return None
         for i in range(100):
             token = tokens[i % len(tokens)]["token"]
@@ -135,7 +132,6 @@ def create_protobuf(uid):
         message.garena = 1
         return message.SerializeToString()
     except Exception as e:
-        app.logger.error(f"Error creating uid protobuf: {e}")
         return None
 
 
@@ -171,11 +167,8 @@ def make_request(encrypt, server_name, token):
         hex_data = response.content.hex()
         binary = bytes.fromhex(hex_data)
         decode = decode_protobuf(binary)
-        if decode is None:
-            app.logger.error("Protobuf decoding returned None.")
         return decode
     except Exception as e:
-        app.logger.error(f"Error in make_request: {e}")
         return None
 
 
@@ -184,11 +177,7 @@ def decode_protobuf(binary):
         items = like_count_pb2.Info()
         items.ParseFromString(binary)
         return items
-    except DecodeError as e:
-        app.logger.error(f"Error decoding Protobuf data: {e}")
-        return None
-    except Exception as e:
-        app.logger.error(f"Unexpected error during protobuf decoding: {e}")
+    except DecodeError:
         return None
 
 
@@ -212,16 +201,12 @@ def handle_requests():
     try:
         def process_request():
             tokens = load_tokens(server_name)
-            if tokens is None:
-                raise Exception("Failed to load tokens.")
             token = tokens[0]['token']
             encrypted_uid = enc(uid)
             if encrypted_uid is None:
                 raise Exception("Encryption of UID failed.")
 
             before = make_request(encrypted_uid, server_name, token)
-            if before is None:
-                raise Exception("Failed to retrieve initial player info.")
             jsone = MessageToJson(before)
             data_before = json.loads(jsone)
             before_like = int(data_before.get('AccountInfo', {}).get('Likes', 0))
@@ -236,8 +221,6 @@ def handle_requests():
             asyncio.run(send_multiple_requests(uid, server_name, url))
 
             after = make_request(encrypted_uid, server_name, token)
-            if after is None:
-                raise Exception("Failed to retrieve player info after like requests.")
             jsone_after = MessageToJson(after)
             data_after = json.loads(jsone_after)
             after_like = int(data_after.get('AccountInfo', {}).get('Likes', 0))
@@ -246,8 +229,9 @@ def handle_requests():
             like_given = after_like - before_like
             status = 1 if like_given != 0 else 2
 
-            # Decrement remaining requests
-            request_counter["remaining"] -= 1
+            # Decrement only if likes were given
+            if like_given > 0:
+                request_counter["remaining"] -= 1
 
             result = {
                 "KeyExpiresAt": format_time_remaining(),
@@ -264,7 +248,6 @@ def handle_requests():
         result = process_request()
         return jsonify(result)
     except Exception as e:
-        app.logger.error(f"Error processing request: {e}")
         return jsonify({"error": str(e)}), 500
 
 
