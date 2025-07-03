@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from datetime import datetime, timedelta
 import asyncio
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
@@ -13,6 +14,27 @@ import uid_generator_pb2
 from google.protobuf.message import DecodeError
 
 app = Flask(__name__)
+
+# ---- Configuration ----
+API_START_TIME = datetime(2025, 7, 3, 12, 0, 0)  # <-- Set when you deploy
+API_EXPIRY_TIME = API_START_TIME + timedelta(days=3) 
+SECRET_API_KEY = "3dayskeysforujjaiwal"
+MAX_REQUESTS = 30
+
+# Runtime counter
+request_counter = {"remaining": MAX_REQUESTS}
+
+# ---- Helper: Format time remaining ----
+def format_time_remaining():
+    now = datetime.utcnow()
+    remaining = API_EXPIRY_TIME - now
+    if remaining.total_seconds() <= 0:
+        return "Expired"
+    days = remaining.days
+    hours, remainder = divmod(remaining.seconds, 3600)
+    minutes, _ = divmod(remainder, 60)
+    return f"{days} day(s), {hours} hour(s), {minutes} minute(s)"
+
 
 def load_tokens(server_name):
     try:
@@ -30,6 +52,7 @@ def load_tokens(server_name):
         app.logger.error(f"Error loading tokens for server {server_name}: {e}")
         return None
 
+
 def encrypt_message(plaintext):
     try:
         key = b'Yg&tc%DEuh6%Zc^8'
@@ -42,6 +65,7 @@ def encrypt_message(plaintext):
         app.logger.error(f"Error encrypting message: {e}")
         return None
 
+
 def create_protobuf_message(user_id, region):
     try:
         message = like_pb2.like()
@@ -51,6 +75,7 @@ def create_protobuf_message(user_id, region):
     except Exception as e:
         app.logger.error(f"Error creating protobuf message: {e}")
         return None
+
 
 async def send_request(encrypted_uid, token, url):
     try:
@@ -75,6 +100,7 @@ async def send_request(encrypted_uid, token, url):
     except Exception as e:
         app.logger.error(f"Exception in send_request: {e}")
         return None
+
 
 async def send_multiple_requests(uid, server_name, url):
     try:
@@ -101,6 +127,7 @@ async def send_multiple_requests(uid, server_name, url):
         app.logger.error(f"Exception in send_multiple_requests: {e}")
         return None
 
+
 def create_protobuf(uid):
     try:
         message = uid_generator_pb2.uid_generator()
@@ -111,12 +138,14 @@ def create_protobuf(uid):
         app.logger.error(f"Error creating uid protobuf: {e}")
         return None
 
+
 def enc(uid):
     protobuf_data = create_protobuf(uid)
     if protobuf_data is None:
         return None
     encrypted_uid = encrypt_message(protobuf_data)
     return encrypted_uid
+
 
 def make_request(encrypt, server_name, token):
     try:
@@ -149,6 +178,7 @@ def make_request(encrypt, server_name, token):
         app.logger.error(f"Error in make_request: {e}")
         return None
 
+
 def decode_protobuf(binary):
     try:
         items = like_count_pb2.Info()
@@ -161,12 +191,23 @@ def decode_protobuf(binary):
         app.logger.error(f"Unexpected error during protobuf decoding: {e}")
         return None
 
+
 @app.route('/like', methods=['GET'])
 def handle_requests():
     uid = request.args.get("uid")
-    server_name = request.args.get("server_name", "").upper()
-    if not uid or not server_name:
-        return jsonify({"error": "UID and server_name are required"}), 400
+    server_name = request.args.get("region", "").upper()
+    key = request.args.get("key")
+
+    if not uid or not server_name or not key:
+        return jsonify({"error": "UID, region, and key are required"}), 400
+
+    # Time and key check
+    current_time = datetime.utcnow()
+    if current_time > API_EXPIRY_TIME or key != SECRET_API_KEY:
+        return jsonify({"error": "Invalid API key or API has expired."}), 403
+
+    if request_counter["remaining"] <= 0:
+        return jsonify({"error": "API key usage limit reached. No remaining requests."}), 403
 
     try:
         def process_request():
@@ -181,17 +222,9 @@ def handle_requests():
             before = make_request(encrypted_uid, server_name, token)
             if before is None:
                 raise Exception("Failed to retrieve initial player info.")
-            try:
-                jsone = MessageToJson(before)
-            except Exception as e:
-                raise Exception(f"Error converting 'before' protobuf to JSON: {e}")
+            jsone = MessageToJson(before)
             data_before = json.loads(jsone)
-            before_like = data_before.get('AccountInfo', {}).get('Likes', 0)
-            try:
-                before_like = int(before_like)
-            except Exception:
-                before_like = 0
-            app.logger.info(f"Likes before command: {before_like}")
+            before_like = int(data_before.get('AccountInfo', {}).get('Likes', 0))
 
             if server_name == "IND":
                 url = "https://client.ind.freefiremobile.com/LikeProfile"
@@ -205,17 +238,20 @@ def handle_requests():
             after = make_request(encrypted_uid, server_name, token)
             if after is None:
                 raise Exception("Failed to retrieve player info after like requests.")
-            try:
-                jsone_after = MessageToJson(after)
-            except Exception as e:
-                raise Exception(f"Error converting 'after' protobuf to JSON: {e}")
+            jsone_after = MessageToJson(after)
             data_after = json.loads(jsone_after)
             after_like = int(data_after.get('AccountInfo', {}).get('Likes', 0))
             player_uid = int(data_after.get('AccountInfo', {}).get('UID', 0))
             player_name = str(data_after.get('AccountInfo', {}).get('PlayerNickname', ''))
             like_given = after_like - before_like
             status = 1 if like_given != 0 else 2
+
+            # Decrement remaining requests
+            request_counter["remaining"] -= 1
+
             result = {
+                "KeyExpiresAt": format_time_remaining(),
+                "KeyRemainingRequests": f"{request_counter['remaining']}/{MAX_REQUESTS}",
                 "LikesGivenByAPI": like_given,
                 "LikesbeforeCommand": before_like,
                 "LikesafterCommand": after_like,
@@ -230,6 +266,7 @@ def handle_requests():
     except Exception as e:
         app.logger.error(f"Error processing request: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True, use_reloader=False)
