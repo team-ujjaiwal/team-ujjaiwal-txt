@@ -15,16 +15,14 @@ from google.protobuf.message import DecodeError
 
 app = Flask(__name__)
 
-# ---- Configuration ----
-API_START_TIME = datetime(2025, 7, 3, 12, 0, 0)  # <-- Set when you deploy
+API_START_TIME = datetime(2025, 7, 3, 12, 0, 0)
 API_EXPIRY_TIME = API_START_TIME + timedelta(days=3)
 SECRET_API_KEY = "3dayskeysforujjaiwal"
 MAX_REQUESTS = 30
 
-# Runtime counter
 request_counter = {"remaining": MAX_REQUESTS}
 
-# ---- Helper: Format time remaining ----
+
 def format_time_remaining():
     now = datetime.utcnow()
     remaining = API_EXPIRY_TIME - now
@@ -33,152 +31,92 @@ def format_time_remaining():
     days = remaining.days
     hours, remainder = divmod(remaining.seconds, 3600)
     minutes, _ = divmod(remainder, 60)
-    return f"{days} day(s), {hours} hour(s), {minutes} minute(s)"}
+    return f"{days} day(s), {hours} hour(s), {minutes} minute(s)"
 
 
 def load_tokens(server_name):
-    try:
-        if server_name == "IND":
-            with open("token_ind.json", "r") as f:
-                tokens = json.load(f)
-        elif server_name in {"BR", "US", "SAC", "NA"}:
-            with open("token_br.json", "r") as f:
-                tokens = json.load(f)
-        else:
-            with open("token_bd.json", "r") as f:
-                tokens = json.load(f)
-        return tokens
-    except Exception as e:
-        app.logger.error(f"Error loading tokens for server {server_name}: {e}")
-        return None
+    if server_name == "IND":
+        with open("token_ind.json", "r") as f:
+            tokens = json.load(f)
+    elif server_name in {"BR", "US", "SAC", "NA"}:
+        with open("token_br.json", "r") as f:
+            tokens = json.load(f)
+    else:
+        with open("token_bd.json", "r") as f:
+            tokens = json.load(f)
+    return tokens
 
 
 def encrypt_message(plaintext):
-    try:
-        key = b'Yg&tc%DEuh6%Zc^8'
-        iv = b'6oyZDr22E3ychjM%'
-        cipher = AES.new(key, AES.MODE_CBC, iv)
-        padded_message = pad(plaintext, AES.block_size)
-        encrypted_message = cipher.encrypt(padded_message)
-        return binascii.hexlify(encrypted_message).decode('utf-8')
-    except Exception as e:
-        app.logger.error(f"Error encrypting message: {e}")
-        return None
+    key = b'Yg&tc%DEuh6%Zc^8'
+    iv = b'6oyZDr22E3ychjM%'
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    padded_message = pad(plaintext, AES.block_size)
+    encrypted_message = cipher.encrypt(padded_message)
+    return binascii.hexlify(encrypted_message).decode('utf-8')
 
 
 def create_protobuf_message(user_id, region):
-    try:
-        message = like_pb2.like()
-        message.uid = int(user_id)
-        message.region = region
-        return message.SerializeToString()
-    except Exception as e:
-        app.logger.error(f"Error creating protobuf message: {e}")
-        return None
+    message = like_pb2.like()
+    message.uid = int(user_id)
+    message.region = region
+    return message.SerializeToString()
 
 
 async def send_request(encrypted_uid, token, url):
-    try:
-        edata = bytes.fromhex(encrypted_uid)
-        headers = {
-            'User-Agent': "Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)",
-            'Connection': "Keep-Alive",
-            'Accept-Encoding': "gzip",
-            'Authorization': f"Bearer {token}",
-            'Content-Type': "application/x-www-form-urlencoded",
-            'Expect': "100-continue",
-            'X-Unity-Version': "2018.4.11f1",
-            'X-GA': "v1 1",
-            'ReleaseVersion': "OB49"
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, data=edata, headers=headers) as response:
-                if response.status != 200:
-                    app.logger.error(f"Request failed with status code: {response.status}")
-                    return response.status
-                return await response.text()
-    except Exception as e:
-        app.logger.error(f"Exception in send_request: {e}")
-        return None
+    edata = bytes.fromhex(encrypted_uid)
+    headers = {
+        'User-Agent': "Dalvik/2.1.0",
+        'Authorization': f"Bearer {token}",
+        'Content-Type': "application/x-www-form-urlencoded",
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, data=edata, headers=headers) as response:
+            return await response.text()
 
 
 async def send_multiple_requests(uid, server_name, url):
-    try:
-        region = server_name
-        protobuf_message = create_protobuf_message(uid, region)
-        if protobuf_message is None:
-            return None
-        encrypted_uid = encrypt_message(protobuf_message)
-        if encrypted_uid is None:
-            return None
-        tasks = []
-        tokens = load_tokens(server_name)
-        if tokens is None:
-            return None
-        for i in range(100):
-            token = tokens[i % len(tokens)]["token"]
-            tasks.append(send_request(encrypted_uid, token, url))
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        return results
-    except Exception as e:
-        app.logger.error(f"Exception in send_multiple_requests: {e}")
-        return None
+    region = server_name
+    protobuf_message = create_protobuf_message(uid, region)
+    encrypted_uid = encrypt_message(protobuf_message)
+    tokens = load_tokens(server_name)
+    tasks = []
+    for i in range(100):
+        token = tokens[i % len(tokens)]["token"]
+        tasks.append(send_request(encrypted_uid, token, url))
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    return results
 
 
 def create_protobuf(uid):
-    try:
-        message = uid_generator_pb2.uid_generator()
-        message.saturn_ = int(uid)
-        message.garena = 1
-        return message.SerializeToString()
-    except Exception as e:
-        return None
+    message = uid_generator_pb2.uid_generator()
+    message.saturn_ = int(uid)
+    message.garena = 1
+    return message.SerializeToString()
 
 
 def enc(uid):
-    protobuf_data = create_protobuf(uid)
-    if protobuf_data is None:
-        return None
-    encrypted_uid = encrypt_message(protobuf_data)
-    return encrypted_uid
+    return encrypt_message(create_protobuf(uid))
 
 
 def make_request(encrypt, server_name, token):
-    try:
-        if server_name == "IND":
-            url = "https://client.ind.freefiremobile.com/GetPlayerPersonalShow"
-        elif server_name in {"BR", "US", "SAC", "NA"}:
-            url = "https://client.us.freefiremobile.com/GetPlayerPersonalShow"
-        else:
-            url = "https://clientbp.ggblueshark.com/GetPlayerPersonalShow"
-        edata = bytes.fromhex(encrypt)
-        headers = {
-            'User-Agent': "Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)",
-            'Connection': "Keep-Alive",
-            'Accept-Encoding': "gzip",
-            'Authorization': f"Bearer {token}",
-            'Content-Type': "application/x-www-form-urlencoded",
-            'Expect': "100-continue",
-            'X-Unity-Version': "2018.4.11f1",
-            'X-GA': "v1 1",
-            'ReleaseVersion': "OB49"
-        }
-        response = requests.post(url, data=edata, headers=headers, verify=False)
-        hex_data = response.content.hex()
-        binary = bytes.fromhex(hex_data)
-        decode = decode_protobuf(binary)
-        return decode
-    except Exception as e:
-        return None
-
-
-def decode_protobuf(binary):
-    try:
-        items = like_count_pb2.Info()
-        items.ParseFromString(binary)
-        return items
-    except DecodeError:
-        return None
+    if server_name == "IND":
+        url = "https://client.ind.freefiremobile.com/GetPlayerPersonalShow"
+    elif server_name in {"BR", "US", "SAC", "NA"}:
+        url = "https://client.us.freefiremobile.com/GetPlayerPersonalShow"
+    else:
+        url = "https://clientbp.ggblueshark.com/GetPlayerPersonalShow"
+    edata = bytes.fromhex(encrypt)
+    headers = {
+        'User-Agent': "Dalvik/2.1.0",
+        'Authorization': f"Bearer {token}",
+        'Content-Type': "application/x-www-form-urlencoded",
+    }
+    response = requests.post(url, data=edata, headers=headers, verify=False)
+    binary = response.content
+    items = like_count_pb2.Info()
+    items.ParseFromString(binary)
+    return items
 
 
 @app.route('/like', methods=['GET'])
@@ -190,10 +128,9 @@ def handle_requests():
     if not uid or not server_name or not key:
         return jsonify({"error": "UID, region, and key are required"}), 400
 
-    # Time and key check
     current_time = datetime.utcnow()
     if current_time > API_EXPIRY_TIME or key != SECRET_API_KEY:
-        return jsonify({"error": "Invalid API key or API has expired."}), 403
+        return jsonify({"error": "Invalid API key or expired."}), 403
 
     if request_counter["remaining"] <= 0:
         return jsonify({"error": "API key usage limit reached. No remaining requests."}), 403
@@ -203,8 +140,6 @@ def handle_requests():
             tokens = load_tokens(server_name)
             token = tokens[0]['token']
             encrypted_uid = enc(uid)
-            if encrypted_uid is None:
-                raise Exception("Encryption of UID failed.")
 
             before = make_request(encrypted_uid, server_name, token)
             jsone = MessageToJson(before)
@@ -227,11 +162,12 @@ def handle_requests():
             player_uid = int(data_after.get('AccountInfo', {}).get('UID', 0))
             player_name = str(data_after.get('AccountInfo', {}).get('PlayerNickname', ''))
             like_given = after_like - before_like
-            status = 1 if like_given != 0 else 2
+            status = 1 if like_given > 0 else 2
 
-            # Decrement only if likes were given
-            if like_given > 0:
-                request_counter["remaining"] -= 1
+            # Decrement by 1 per call
+            request_counter["remaining"] -= 1
+            if request_counter["remaining"] < 0:
+                request_counter["remaining"] = 0
 
             result = {
                 "KeyExpiresAt": format_time_remaining(),
