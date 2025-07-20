@@ -18,8 +18,8 @@ app = Flask(__name__)
 # ---- Configuration ----
 API_START_TIME = datetime(2025, 7, 3, 12, 0, 0)  # <-- Set when you deploy
 API_EXPIRY_TIME = API_START_TIME + timedelta(days=3) 
-SECRET_API_KEY = "3dayskeysforujjaiwal"
-MAX_REQUESTS = 3000
+SECRET_API_KEY = "60dayskeysforujjaiwal"
+MAX_REQUESTS = 6000
 
 # Runtime counter
 request_counter = {"remaining": MAX_REQUESTS}
